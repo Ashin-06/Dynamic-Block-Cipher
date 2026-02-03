@@ -32,7 +32,7 @@ This project is built as a Jupyter Notebook (`.ipynb`) for easy visualization of
 
 1.  **Clone the repository:**
     ```bash
-    git clone [https://github.com/YOUR_USERNAME/Dynamic-Block-Cipher.git](https://github.com/YOUR_USERNAME/Dynamic-Block-Cipher.git)
+    git clone [https://github.com/Ashin-06/Dynamic-Block-Cipher.git](https://github.com/Ashin-06/Dynamic-Block-Cipher.git)
     ```
 2.  **Navigate to the folder:**
     ```bash
