@@ -1,0 +1,5 @@
+# No external dependencies — Python 3.8+ stdlib only.
+# tkinter  (bundled with standard Python on Windows/macOS/Linux)
+# hashlib  (stdlib)
+# hmac     (stdlib)
+# os       (stdlib)
