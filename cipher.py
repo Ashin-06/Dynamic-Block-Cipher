@@ -1,6 +1,3 @@
-SBOX = [0x63, 0x7c, 0x77]
-def permute_bits(block_bytes, perm_table):
-    return block_bytes
-class FeistelCipher:
-    def __init__(self, password):
-        pass
+import hashlib
+def derive_keys(password, salt):
+    return b"key_enc", b"key_mac"
