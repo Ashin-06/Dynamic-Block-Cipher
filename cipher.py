@@ -1,4 +1,4 @@
-def round_function(X, K):
-    return X
-def encrypt_block(block, subkeys):
-    return block
+def pad(data, block_size=512):
+    return data
+def unpad(data):
+    return data
