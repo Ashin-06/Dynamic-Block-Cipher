@@ -1,2 +1,2 @@
-import hmac
-# Add integrity checks skeleton
+import argparse
+# CLI skeleton
