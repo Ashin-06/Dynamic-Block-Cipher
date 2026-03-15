@@ -1,2 +1,2 @@
 import argparse
-# CLI skeleton
+# String CLI
