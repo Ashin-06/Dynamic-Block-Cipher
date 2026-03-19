@@ -1,2 +1,2 @@
 import tkinter as tk
-# GUI file tab
+# GUI avalanche canvas
