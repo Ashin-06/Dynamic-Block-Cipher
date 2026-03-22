@@ -70,6 +70,7 @@ Password  ──►  PBKDF2-HMAC-SHA256 (600 000 iters, random 16-byte salt)
 ├── gui.py             # Desktop GUI (tkinter — no install needed)
 ├── demo.py            # Interactive feature demonstration (CLI)
 ├── avalanche_demo.py  # Round-by-round bit diffusion chart (CLI)
+├── pq_key_exchange.py # Hybrid Post-Quantum Key Agreement (KEM)
 ├── test_cipher.py     # 13 automated unit tests
 ├── ARCHITECTURE.md    # Detailed block cipher architecture & designs
 ├── FLOWS.md           # Visual execution flows (Mermaid diagrams)

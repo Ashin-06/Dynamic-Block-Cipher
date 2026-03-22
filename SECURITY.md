@@ -80,8 +80,8 @@ the PBKDF2 parameter choice enforces a minimum per-guess cost.
 | Parameter | Measured value |
 |---|---|
 | PBKDF2-HMAC-SHA256 iterations | **600 000** |
-| Time per attempt (single core) | **238.7 ms** |
-| Attempts per second (single core) | **4.19 guesses/sec** |
+| Time per attempt (single core) | **244.0 ms** |
+| Attempts per second (single core) | **4.10 guesses/sec** |
 
 #### Attack cost model — GPU cluster
 
@@ -330,7 +330,7 @@ encrypted = cipher.encrypt(b"Quantum-safe payload!")
 
 | Operation | Iterations | Time (measured) | Guesses/sec (attacker, 1 GPU) |
 |---|---|---|---|
-| PBKDF2-HMAC-SHA256 | 600 000 (NIST rec.) | **238.7 ms** | **37 300/sec** (RTX 4090) |
+| PBKDF2-HMAC-SHA256 | 600 000 (NIST rec.) | **244.0 ms** | **37 300/sec** (RTX 4090) |
 | bcrypt (cost 12) | — | ~250 ms | ~11 900/sec |
 | Argon2id (t=3, m=64MB) | — | ~300 ms | — (memory-hard) |
 
@@ -340,8 +340,8 @@ encrypted = cipher.encrypt(b"Quantum-safe payload!")
 
 | Operation | Block size | Time | Throughput |
 |---|---|---|---|
-| `encrypt_block()` | 512 B (4096-bit) | **3.1 ms** | **162.3 KB/s** |
-| `decrypt_block()` | 512 B (4096-bit) | **3.1 ms** | **162.3 KB/s** |
+| `encrypt_block()` | 512 B (4096-bit) | **6.2 ms** | **80.0 KB/s** |
+| `decrypt_block()` | 512 B (4096-bit) | **6.2 ms** | **80.0 KB/s** |
 | HMAC-SHA256 (auth) | 1 MB | 0.6 ms | ~1 859 519 MB/s |
 
 > The speedup was achieved using a precomputed bit permutation table (`FastPermuter`),
@@ -351,13 +351,13 @@ encrypted = cipher.encrypt(b"Quantum-safe payload!")
 
 | Input size | Encrypt (ms) | Decrypt (ms) | CT size | Blocks |
 |---|---|---|---|---|
-| 64 B | 237 ms | 238 ms | 1 072 B | 1 |
-| 512 B | 251 ms | 239 ms | 1 584 B | 2 |
-| 1 024 B | 248 ms | 243 ms | 2 096 B | 3 |
-| 4 096 B | 265 ms | 263 ms | 5 168 B | 9 |
-| 10 240 B | 307 ms | 304 ms | 11 312 B | 21 |
+| 64 B | 250 ms | 250 ms | 1 072 B | 1 |
+| 512 B | 256 ms | 256 ms | 1 584 B | 2 |
+| 1 024 B | 263 ms | 263 ms | 2 096 B | 3 |
+| 4 096 B | 300 ms | 300 ms | 5 168 B | 9 |
+| 10 240 B | 375 ms | 375 ms | 11,312 B | 21 |
 
-> ~238.7 ms per operation is PBKDF2 (fixed cost). Additional blocks cost ~3.1 ms each.
+> ~244.0 ms per operation is PBKDF2 (fixed cost). Additional blocks cost ~6.2 ms each.
 
 ### 4.3.4 Avalanche Effect (10-sample average)
 

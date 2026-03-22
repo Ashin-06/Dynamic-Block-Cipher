@@ -10,7 +10,7 @@ This flow shows how the user's password and a random salt are converted into the
 
 ```mermaid
 graph TD
-    Password[User Password] --> PBKDF2[PBKDF2-HMAC-SHA256 <br/> 600,000 Iterations]
+    Password[User Password] --> PBKDF2["PBKDF2-HMAC-SHA256 (600,000 Iterations)"]
     Salt[Random 16-byte Salt] --> PBKDF2
     PBKDF2 --> MasterKey[256-bit Master Key]
     
@@ -19,7 +19,7 @@ graph TD
     SplitKey -->|Last 16 Bytes| K_mac[Authentication Key k_mac]
     
     K_enc --> SubkeyGen[HMAC-SHA256 Subkey Derivation Counter Loop]
-    SubkeyGen --> Subkeys[64 × 1024-bit Round Subkeys <br/> K_0 to K_63]
+    SubkeyGen --> Subkeys["64 × 1024-bit Round Subkeys (K_0 to K_63)"]
     
     K_mac --> HMAC_Auth[HMAC Tag Calculation / Verification]
 ```
@@ -43,7 +43,7 @@ flowchart TD
     IV --> Concat
     CT --> Concat
     
-    Concat --> OutPayload[Salt || IV || Ciphertext]
+    Concat --> OutPayload["Salt || IV || Ciphertext"]
     OutPayload --> HMAC_Calc[HMAC-SHA256 Calculation]
     K_mac[MAC Key k_mac] --> HMAC_Calc
     

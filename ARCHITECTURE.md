@@ -136,3 +136,18 @@ The final output is formatted as follows:
 During decryption, the receiver computes the expected HMAC tag over the received Salt, IV, and Ciphertext, and compares it with the appended tag using constant-time comparison (`hmac.compare_digest`). If they match, decryption proceeds; otherwise, it is aborted immediately. This protects against:
 * **Padding Oracle Attacks:** Because the tag is verified *before* decryption/unpadding, the padding is never parsed if the ciphertext was tampered with.
 * **Timing Attacks:** The constant-time comparison prevents attackers from learning information about the tag verification speed.
+
+---
+
+## 6. Security Hardening & Hybrid Post-Quantum Extensions
+
+### 6.1 Memory-Safe Passphrase Hardening
+To mitigate cold-boot or memory-dump attacks, the class does not store the passphrase as an immutable Python string. Instead, the constructor encodes it into a mutable `bytearray`.
+* **Explicit Clearing:** The class exposes a `.clear()` method that overwrites all passphrase bytes with zero.
+* **Auto-Destruct:** The `__del__` destructor automatically calls `.clear()` when the object falls out of scope, minimizing the duration that sensitive material resides on the heap.
+
+### 6.2 Hybrid Post-Quantum Key Encapsulation (ML-KEM-768)
+Symmetric keys can be securely established over networks using a hybrid protocol:
+* **Algorithms:** Combines classical **ECDH** (secp256r1) with post-quantum **ML-KEM-768** (Kyber768, FIPS 203 compliant).
+* **Combination KDF:** Combined secrets are derived using HKDF-SHA256, ensuring that the derived session key is secure as long as *either* ECDH or ML-KEM remains cryptographically unbroken.
+* **Implementation:** Provided in the `pq_key_exchange.py` module using `liboqs-python` integration.

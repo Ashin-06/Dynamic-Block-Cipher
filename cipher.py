@@ -43,6 +43,10 @@ BIT_PERMUTATION = _generate_bit_permutation()
 
 class FastPermuter:
     def __init__(self, perm_table):
+        # Note: The lookup table is built from the inverse permutation.
+        # Thus, permute_bits actually applies the inverse of BIT_PERMUTATION.
+        # This design choice accelerates bit shuffling. Correctness is fully preserved
+        # because GFN decryption mirrors GFN encryption structurally.
         inv_perm = [0] * 1024
         for i, pos in enumerate(perm_table):
             inv_perm[pos] = i
@@ -110,12 +114,21 @@ def mix_bytes(block_bytes: bytes) -> bytes:
     
     return val.to_bytes(128, byteorder='big')
 
-def round_function(X: bytes, K: bytes) -> bytes:
+def derive_bit_permutation(k_enc):
+    """Derive a key-dependent 1024-bit permutation table deterministically from k_enc."""
+    seed_val = int.from_bytes(k_enc, byteorder='big')
+    rng = random.Random(seed_val)
+    perm = list(range(1024))
+    rng.shuffle(perm)
+    return perm
+
+def round_function(X: bytes, K: bytes, permuter=None) -> bytes:
     """
     Feistel round function  F(X, K)  — four-stage pipeline.
 
     X : 128 bytes  (1024-bit data sub-block)
     K : 128 bytes  (1024-bit round subkey)
+    permuter: optional FastPermuter instance. If not provided, falls back to the default static permuter.
 
     Stages
     ------
@@ -129,7 +142,10 @@ def round_function(X: bytes, K: bytes) -> bytes:
     # Stage 2 — non-linear substitution (confusion)
     S = bytes(SBOX[b] for b in Z)
     # Stage 3 — local bit diffusion
-    P = permute_bits(S, BIT_PERMUTATION)
+    if permuter is not None:
+        P = permuter.permute(S)
+    else:
+        P = permute_bits(S, BIT_PERMUTATION)
     # Stage 4 — global byte diffusion (branch number 5)
     return mix_bytes(P)
 
@@ -137,10 +153,10 @@ def xor_bytes(a, b):
     """Helper to XOR two byte sequences of equal length."""
     return bytes(x ^ y for x, y in zip(a, b))
 
-def derive_keys(password: str, salt: bytes, iterations: int = 600000) -> tuple:
+def derive_keys(password, salt: bytes, iterations: int = 600000) -> tuple:
     """
     Derive a 256-bit encryption key and a 256-bit authentication key from
-    a user password using PBKDF2-HMAC-SHA256.
+    a user password (str, bytes, or bytearray) using PBKDF2-HMAC-SHA256.
 
     Iteration count: 600 000  (NIST SP 800-132 draft update 2023 recommendation
     for PBKDF2-HMAC-SHA256 with interactive logins).
@@ -149,17 +165,18 @@ def derive_keys(password: str, salt: bytes, iterations: int = 600000) -> tuple:
 
     Returns
     -------
-    (k_enc, k_mac) : (bytes, bytes)  — each 32 bytes (256-bit)
+    (k_enc, k_mac) : (bytearray, bytearray)  — each 32 bytes (256-bit)
     """
+    pwd_bytes = password if isinstance(password, (bytes, bytearray)) else password.encode('utf-8')
     master_key = hashlib.pbkdf2_hmac(
         'sha256',
-        password.encode('utf-8'),
+        pwd_bytes,
         salt,
         iterations,
     )
     # Separate keys via HMAC domain separation — prevents key-reuse attacks
-    k_enc = hmac.new(master_key, b"encryption_key",    hashlib.sha256).digest()
-    k_mac = hmac.new(master_key, b"authentication_key", hashlib.sha256).digest()
+    k_enc = bytearray(hmac.new(master_key, b"encryption_key",    hashlib.sha256).digest())
+    k_mac = bytearray(hmac.new(master_key, b"authentication_key", hashlib.sha256).digest())
     return k_enc, k_mac
 
 def derive_subkeys(k_enc, num_rounds=32):
@@ -169,15 +186,15 @@ def derive_subkeys(k_enc, num_rounds=32):
     """
     subkeys = []
     for i in range(num_rounds * 2):
-        subkey = b""
+        subkey = bytearray()
         for part in range(4):  # 4 * 32 bytes = 128 bytes (1024 bits)
             msg = f"subkey_{i}_part_{part}".encode('utf-8')
             h = hmac.new(k_enc, msg, hashlib.sha256)
-            subkey += h.digest()
+            subkey.extend(h.digest())
         subkeys.append(subkey)
     return subkeys
 
-def encrypt_block(block, subkeys):
+def encrypt_block(block, subkeys, permuter=None):
     """
     Encrypt a single 512-byte (4096-bit) block using 32-round 4-branch Type-II GFN.
     """
@@ -194,8 +211,8 @@ def encrypt_block(block, subkeys):
         k1 = subkeys[2 * r + 1]
 
         # Feistel round function evaluations
-        f0 = round_function(X[1], k0)
-        f1 = round_function(X[3], k1)
+        f0 = round_function(X[1], k0, permuter)
+        f1 = round_function(X[3], k1, permuter)
 
         # XOR Feistel additions
         y0 = xor_bytes(X[0], f0)
@@ -208,7 +225,7 @@ def encrypt_block(block, subkeys):
 
     return b"".join(X)
 
-def decrypt_block(block, subkeys):
+def decrypt_block(block, subkeys, permuter=None):
     """
     Decrypt a single 512-byte (4096-bit) block by running GFN in reverse.
     """
@@ -225,8 +242,8 @@ def decrypt_block(block, subkeys):
         k1 = subkeys[2 * r + 1]
 
         # Undo the GFN round
-        f0 = round_function(X[0], k0)
-        f1 = round_function(X[2], k1)
+        f0 = round_function(X[0], k0, permuter)
+        f1 = round_function(X[2], k1, permuter)
 
         x0_prev = xor_bytes(X[3], f0)
         x1_prev = X[0]
@@ -246,12 +263,12 @@ def pad(data, block_size=512):
     padding = bytes([0] * (pad_len - 2)) + pad_len.to_bytes(2, byteorder='big')
     return data + padding
 
-def unpad(data):
+def unpad(data, block_size=512):
     """Remove padding using the 2-byte big-endian length indicator."""
     if len(data) < 2:
         raise ValueError("Data is too short to contain padding.")
     pad_len = int.from_bytes(data[-2:], byteorder='big')
-    if pad_len < 2 or pad_len > 513:
+    if pad_len < 2 or pad_len > block_size + 1:
         raise ValueError("Invalid padding length.")
     padding_start = len(data) - pad_len
     if padding_start < 0:
@@ -264,22 +281,39 @@ def unpad(data):
 class FeistelCipher:
     """
     The main cipher class providing high-level encryption/decryption API.
-    Stores only password as-is (needed for PBKDF2 derivation on each call),
-    but never caches derived key material between calls.
+    Stores the password in a mutable bytearray to allow zeroing password memory
+    when no longer needed.
     """
     def __init__(self, password):
         if len(password) < 8:
             raise ValueError("Password must be at least 8 characters long.")
-        self.password = password
+        # Store password as a mutable bytearray to prevent immutable string memory persistence
+        self._password = bytearray(password.encode('utf-8'))
+
+    def clear(self):
+        """Zero out the password memory buffer."""
+        if hasattr(self, '_password') and self._password is not None:
+            for i in range(len(self._password)):
+                self._password[i] = 0
+            self._password = None
+
+    def __del__(self):
+        self.clear()
 
     def encrypt(self, plaintext_bytes):
         """
         Encrypts plaintext_bytes.
         Returns: salt (16B) + IV (512B) + ciphertext_blocks + HMAC-SHA256 (32B)
         """
+        if self._password is None:
+            raise ValueError("Cipher has been cleared.")
         salt = os.urandom(16)
-        k_enc, k_mac = derive_keys(self.password, salt)
+        k_enc, k_mac = derive_keys(self._password, salt)
         subkeys = derive_subkeys(k_enc)
+
+        # Generate session key-dependent FastPermuter
+        bit_perm = derive_bit_permutation(k_enc)
+        permuter = FastPermuter(bit_perm)
 
         # Generate 512-byte random Initialization Vector (IV)
         iv = os.urandom(512)
@@ -293,7 +327,7 @@ class FeistelCipher:
         for i in range(0, len(padded_data), 512):
             block = padded_data[i:i+512]
             mixed = xor_bytes(block, prev)
-            enc = encrypt_block(mixed, subkeys)
+            enc = encrypt_block(mixed, subkeys, permuter)
             ciphertext_blocks.append(enc)
             prev = enc
 
@@ -302,6 +336,12 @@ class FeistelCipher:
         # Compute HMAC tag over the entire encrypted payload (Encrypt-then-MAC)
         tag = hmac.new(k_mac, encrypted_payload, hashlib.sha256).digest()
 
+        # Zero out sensitive key material in memory
+        for i in range(len(k_enc)): k_enc[i] = 0
+        for i in range(len(k_mac)): k_mac[i] = 0
+        for sk in subkeys:
+            for i in range(len(sk)): sk[i] = 0
+
         return encrypted_payload + tag
 
     def decrypt(self, ciphertext_bytes):
@@ -309,6 +349,8 @@ class FeistelCipher:
         Decrypts ciphertext_bytes.
         Checks integrity first via HMAC-SHA256. Throws ValueError on failure.
         """
+        if self._password is None:
+            raise ValueError("Cipher has been cleared.")
         if len(ciphertext_bytes) < 16 + 512 + 32:
             raise ValueError("Ciphertext is too short.")
 
@@ -316,11 +358,14 @@ class FeistelCipher:
         mac_tag = ciphertext_bytes[-32:]
         encrypted_payload = ciphertext_bytes[:-32]
 
-        k_enc, k_mac = derive_keys(self.password, salt)
+        k_enc, k_mac = derive_keys(self._password, salt)
 
         # Verify HMAC tag first (constant-time comparison)
         expected_tag = hmac.new(k_mac, encrypted_payload, hashlib.sha256).digest()
         if not hmac.compare_digest(mac_tag, expected_tag):
+            # Scrub key material before raising error
+            for i in range(len(k_enc)): k_enc[i] = 0
+            for i in range(len(k_mac)): k_mac[i] = 0
             raise ValueError("Integrity check failed. Incorrect password or data tampered.")
 
         iv = encrypted_payload[16:528]
@@ -328,15 +373,25 @@ class FeistelCipher:
 
         subkeys = derive_subkeys(k_enc)
 
+        # Generate session key-dependent FastPermuter
+        bit_perm = derive_bit_permutation(k_enc)
+        permuter = FastPermuter(bit_perm)
+
         # CBC Decryption
         decrypted_blocks = []
         prev = iv
         for i in range(0, len(ciphertext_blocks), 512):
             block = ciphertext_blocks[i:i+512]
-            dec = decrypt_block(block, subkeys)
+            dec = decrypt_block(block, subkeys, permuter)
             plain = xor_bytes(dec, prev)
             decrypted_blocks.append(plain)
             prev = block
+
+        # Zero out sensitive key material in memory
+        for i in range(len(k_enc)): k_enc[i] = 0
+        for i in range(len(k_mac)): k_mac[i] = 0
+        for sk in subkeys:
+            for i in range(len(sk)): sk[i] = 0
 
         padded_plaintext = b"".join(decrypted_blocks)
         return unpad(padded_plaintext)

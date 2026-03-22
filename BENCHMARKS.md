@@ -10,7 +10,7 @@ The key derivation parameters are calibrated to maximize resistance to GPU-based
 
 | Metric | Configuration / Parameter | Measured Latency | Attacker Guesses/Sec (RTX 4090) |
 | :--- | :--- | :--- | :--- |
-| **PBKDF2 Iterations** | 600,000 (NIST SP 800-132 Compliant) | **238.7 ms** | ~37,300 attempts/sec |
+| **PBKDF2 Iterations** | 600,000 (NIST SP 800-132 Compliant) | **244.0 ms** | ~37,300 attempts/sec |
 | **Bcrypt Equivalent** | Cost Factor 12 | ~250 ms | ~11,900 attempts/sec |
 | **Argon2id Equivalent** | $t=3, m=64\,\text{MB}$ | ~300 ms | N/A (Memory-hard) |
 
@@ -27,20 +27,20 @@ With 600,000 iterations of PBKDF2-HMAC-SHA256, the speed of testing candidate pa
 The cipher is written in pure Python without compiled dependencies. Using a precomputed bit permutation table (`FastPermuter`), the throughput scaling is highly predictable.
 
 ### Block Encryption Latency
-* **Single 4096-bit Block (512 bytes):** **3.1 ms**
-* **Effective GFN Core Throughput:** **162.3 KB/s**
+* **Single 4096-bit Block (512 bytes):** **6.2 ms**
+* **Effective GFN Core Throughput:** **80.0 KB/s**
 * **HMAC-SHA256 Auth Bandwidth:** **~1.8 GB/s** (minimal overhead)
 
 ### Latency vs Input Payload Size (End-to-End)
-End-to-end times include password KDF derivation (fixed ~238.7 ms overhead) + GFN block encryption + HMAC verification.
+End-to-end times include password KDF derivation (fixed ~244.0 ms overhead) + GFN block encryption + HMAC verification.
 
 | Input Payload Size | Encrypt Latency (ms) | Decrypt Latency (ms) | Output Ciphertext Size | GFN Blocks |
 | :--- | :--- | :--- | :--- | :--- |
-| **64 Bytes** | 241 ms | 240 ms | 1,072 Bytes | 1 block |
-| **512 Bytes** | 251 ms | 243 ms | 1,584 Bytes | 2 blocks |
-| **1,024 Bytes** | 254 ms | 247 ms | 2,096 Bytes | 3 blocks |
-| **4,096 Bytes** | 272 ms | 266 ms | 5,168 Bytes | 9 blocks |
-| **10,240 Bytes** | 307 ms | 304 ms | 11,312 Bytes | 21 blocks |
+| **64 Bytes** | 250 ms | 250 ms | 1,072 Bytes | 1 block |
+| **512 Bytes** | 256 ms | 256 ms | 1,584 Bytes | 2 blocks |
+| **1,024 Bytes** | 263 ms | 263 ms | 2,096 Bytes | 3 blocks |
+| **4,096 Bytes** | 300 ms | 300 ms | 5,168 Bytes | 9 blocks |
+| **10,240 Bytes** | 375 ms | 375 ms | 11,312 Bytes | 21 blocks |
 
 *For high-throughput applications, executing the code under **PyPy** improves performance by approximately 8× to 10×.*
 

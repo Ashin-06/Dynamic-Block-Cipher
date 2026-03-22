@@ -113,6 +113,12 @@ Run `avalanche_demo.py` to see a detailed ASCII chart showing bit-flipping perce
 python avalanche_demo.py
 ```
 
+### 5.3 Hybrid Post-Quantum Key Agreement Demo
+Run `pq_key_exchange.py` to demonstrate establishing a shared symmetric key using a hybrid combination of ML-KEM-768 (Kyber768, FIPS 203) and standard classical ECDH (secp256r1):
+```bash
+python pq_key_exchange.py
+```
+
 ---
 
 ## 6. Automated Unit Tests

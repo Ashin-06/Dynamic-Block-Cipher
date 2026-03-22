@@ -171,7 +171,7 @@ enc_file = test_file + ".enc"
 with open(enc_file, 'wb') as f:
     f.write(encrypted_data)
 
-info(f"Refactor: Encrypted '{test_file}' ({len(raw)}B) -> '{enc_file}' ({len(encrypted_data)}B)")
+info(f"Encrypted '{test_file}' ({len(raw)}B) -> '{enc_file}' ({len(encrypted_data)}B)")
 
 with open(enc_file, 'rb') as f:
     read_back = f.read()
