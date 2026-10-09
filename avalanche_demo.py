@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-avalanche_demo.py — Bit Diffusion Analysis for the Secure GFN Block Cipher
+avalanche_demo.py — Bit Diffusion Analysis for the Experimental GFN Block Cipher
 ===========================================================================
 Shows how a single flipped bit in the plaintext or key propagates through
 all 32 Feistel rounds, converging toward the ideal 50 % Hamming distance.
@@ -92,7 +92,7 @@ def _row(r: int, pt: float, key: float) -> str:
     return (f"  {r:02d} │ {_bar(pt)} {pt:5.0f} ({pt/MAX*100:4.1f}%)"
             f" │ {key:5.0f} ({key/MAX*100:4.1f}%)")
 
-def print_report(pt_avg: list, key_avg: list, trials: int) -> None:
+def print_report(pt_avg: list, key_avg: list, trials: int, plot=False) -> None:
     BOLD = "\033[1m"
     CYAN = "\033[96m"
     GREEN= "\033[92m"
@@ -101,7 +101,7 @@ def print_report(pt_avg: list, key_avg: list, trials: int) -> None:
 
     print()
     print(BOLD + CYAN + "═" * 80 + RST)
-    print(BOLD + CYAN + "  AVALANCHE EFFECT  —  Secure GFN v2 with MixBytes  "
+    print(BOLD + CYAN + "  AVALANCHE EFFECT  —  Experimental GFN v2 with MixBytes  "
           + f"(n={trials} trials, block=4096-bit)" + RST)
     print(BOLD + CYAN + "═" * 80 + RST)
 
@@ -149,9 +149,12 @@ def print_report(pt_avg: list, key_avg: list, trials: int) -> None:
     print("     Stage 3 │ 1024-bit deterministic bit permutation       (local diffusion)")
     print("     Stage 4 │ MixBytes — GF(2^8) MixColumns, branch #5   (global diffusion) ← NEW")
     print()
-    print("  MixBytes ensures any 1-byte difference at Stage 2 output spreads to")
-    print("  4 bytes before the next round, halving the rounds needed for full avalanche.")
+    print("  The mixing layer has a known repeated-output weakness.")
     print()
+
+    print("  These measurements do not establish security; see SECURITY.md.")
+    if not plot:
+        return
 
     # Try matplotlib
     try:
@@ -178,7 +181,7 @@ def print_report(pt_avg: list, key_avg: list, trials: int) -> None:
 
         ax.set_xlabel("Feistel Round", color="#9090b8")
         ax.set_ylabel("Hamming Distance (% of 4096 bits)", color="#9090b8")
-        ax.set_title("Avalanche Effect — Secure GFN v2 with MixBytes",
+        ax.set_title("Avalanche Effect — Experimental GFN v2 with MixBytes",
                      color="#a87fd4", fontsize=13, fontweight="bold")
         ax.tick_params(colors="#9090b8")
         for spine in ax.spines.values():
@@ -197,11 +200,15 @@ def print_report(pt_avg: list, key_avg: list, trials: int) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Avalanche Effect Analysis for the Secure GFN Block Cipher")
+        description="Avalanche Effect Analysis for the Experimental GFN Block Cipher")
     parser.add_argument("--trials", type=int, default=20,
                         help="Number of random block trials to average (default: 20)")
+    parser.add_argument("--plot", action="store_true", help="Open an optional matplotlib chart")
     args = parser.parse_args()
+
+    if args.trials < 1:
+        parser.error("--trials must be positive")
 
     print(f"  Running avalanche analysis over {args.trials} random block trials…")
     pt_avg, key_avg = run_analysis(trials=args.trials)
-    print_report(pt_avg, key_avg, trials=args.trials)
+    print_report(pt_avg, key_avg, trials=args.trials, plot=args.plot)

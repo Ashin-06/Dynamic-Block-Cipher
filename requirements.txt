@@ -1,5 +1,3 @@
-# No external dependencies — Python 3.8+ stdlib only.
-# tkinter  (bundled with standard Python on Windows/macOS/Linux)
-# hashlib  (stdlib)
-# hmac     (stdlib)
-# os       (stdlib)
+# Core CLI/library: Python 3.10+ standard library only.
+# GUI: tkinter (OS/Python distribution package).
+# Optional PQ: cryptography, liboqs-python, and native liboqs; see README.

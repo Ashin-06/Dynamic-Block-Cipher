@@ -1,3 +1,5 @@
+> **Educational design only.** The current diffusion layer has a known structural weakness. See [SECURITY.md](SECURITY.md). Design diagrams and historical architectural rationale do not establish security.
+
 # Cryptographic Flow Diagrams
 
 This document contains flowcharts and block diagrams of the main execution flows within the cipher, detailing key derivation, GFN round structure, round function internals, and the Encrypt-then-MAC process.
@@ -14,9 +16,9 @@ graph TD
     Salt[Random 16-byte Salt] --> PBKDF2
     PBKDF2 --> MasterKey[256-bit Master Key]
     
-    MasterKey --> SplitKey{Split Key}
-    SplitKey -->|First 16 Bytes| K_enc[Encryption Key k_enc]
-    SplitKey -->|Last 16 Bytes| K_mac[Authentication Key k_mac]
+    MasterKey --> SplitKey{HMAC domain separation}
+    SplitKey -->|encryption_key label| K_enc[32-byte Encryption Key k_enc]
+    SplitKey -->|authentication_key label| K_mac[32-byte Authentication Key k_mac]
     
     K_enc --> SubkeyGen[HMAC-SHA256 Subkey Derivation Counter Loop]
     SubkeyGen --> Subkeys["64 × 1024-bit Round Subkeys (K_0 to K_63)"]
@@ -32,7 +34,7 @@ This flow details the sequence of processing a plaintext payload into the final 
 
 ```mermaid
 flowchart TD
-    PT[Plaintext Data] --> Pad[PKCS#7 Padding to 512-byte blocks]
+    PT[Plaintext Data] --> Pad[Zero padding + two-byte length to 512-byte blocks]
     Pad --> CBC{CBC Mode loop}
     IV[Random 512-byte IV] --> CBC
     Subkeys[Round Subkeys] --> CBC
@@ -115,9 +117,10 @@ This diagram traces the operations performed inside a single round function $F$ 
                           │
                           ▼
                Linear Mixing Layer
-             - Split into 16 x 64-bit subwords: W_0..W_15
-             - Apply Circular Rotations & XOR:
-               W_i = W_i ^ (W_next <<< 17) ^ (W_next5 <<< 31)
+             - MixColumns on each 4-byte group
+             - Sequential whole-word rotate-XOR
+               Rotation distances: 512, 256, 128, 64, 17, 251
+             - Known weakness: repeated 64-bit output pattern
                           │
                           ▼
                Output Word (128 bytes)

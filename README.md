@@ -1,165 +1,73 @@
-# Dynamic Block Cipher — Secure GFN v2
+# Dynamic Block Cipher
 
-[![Python](https://img.shields.io/badge/Python-3.8%2B-blue?logo=python&logoColor=white)](https://python.org)
-[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![Security](https://img.shields.io/badge/Security-Verified-brightgreen)](#features)
-[![Tests](https://img.shields.io/badge/Tests-13%20Passing-brightgreen)](#testing)
-[![No Dependencies](https://img.shields.io/badge/Dependencies-None%20(stdlib%20only)-lightgrey)](#installation)
-[![PQ Security](https://img.shields.io/badge/Post--Quantum-128--bit%20(NIST%20Cat.1)-blueviolet)](SECURITY.md)
+An educational Python implementation of a 32-round, four-branch Generalized Feistel Network, with a desktop interface, file and text commands, and diffusion experiments.
 
-A professional-grade custom symmetric block cipher built on a **4-branch Type-II Generalized Feistel Network (GFN)**. It implements state-of-the-art cryptographic design patterns to ensure confidentiality, integrity, and performance.
+[![Tests](https://github.com/Ashin-06/Dynamic-Block-Cipher/actions/workflows/tests.yml/badge.svg)](https://github.com/Ashin-06/Dynamic-Block-Cipher/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
----
+**Experimental cryptography: do not use this custom cipher to protect sensitive data.** The audit identified a structural diffusion weakness. Passing round-trip and avalanche tests does not establish security. See [SECURITY.md](SECURITY.md) and [AUDIT.md](AUDIT.md).
 
-## Documentation Index
+## Quick start
 
-For detailed descriptions of the cipher design, internals, and operations, refer to the following documents:
-* 📘 **[Architecture Specification](ARCHITECTURE.md)** — Detailed block cipher architecture, confusion/diffusion layers, and key derivation.
-* 📊 **[Flow Diagrams](FLOWS.md)** — Interactive Mermaid diagrams showing data flows, subkey counter loops, and GFN branch transformations.
-* ⚡ **[Performance & Security Benchmarks](BENCHMARKS.md)** — Empirical block throughput, password cracking cost estimations, and avalanche statistics.
-* 💻 **[Working & Usage Guide](USAGE.md)** — Comprehensive installation and usage manuals for GUI, CLI, and Python API.
-* 🛡️ **[Security Analysis](SECURITY.md)** — Core pre-quantum and post-quantum threat analysis.
+Use Python 3.10 or newer. The core library and CLI have no third-party dependencies.
 
----
-
-## Architecture
-
-```
-Password  ──►  PBKDF2-HMAC-SHA256 (600 000 iters, random 16-byte salt)
-                        │
-                   Master Key (256-bit)
-                   ┌────┴────┐
-               k_enc        k_mac
-                 │              │
-          HMAC-SHA256        HMAC-SHA256
-          key schedule       (auth tag)
-          (64 subkeys,
-           1024-bit each)
-                 │
-   ┌─────────────▼─────────────────────────────────┐
-   │  4-Branch Type-II GFN  ×  32 rounds           │
-   │  Block size: 4096-bit (512 bytes)              │
-   │  Round function F(X, K):                       │
-   │    1. XOR sub-block with round subkey          │
-   │    2. AES S-Box substitution  (confusion)      │
-   │    3. 1024-bit permutation    (diffusion)      │
-   │  Mode: CBC with random 512-byte IV             │
-   └─────────────────────────────────────────────────┘
-                 │
-         Ciphertext payload
-                 │
-   Encrypt-then-MAC  (HMAC-SHA256, constant-time verify)
-```
-
----
-
-## Key Features
-
-* **High-Security Key Derivation:** Uses PBKDF2-HMAC-SHA256 with 600,000 iterations (NIST standard compliant) and a cryptographically secure random 16-byte salt to derive keys from passwords.
-* **Hardened 4-Branch GFN:** A 32-round Generalized Feistel Network incorporating the standard Rijndael (AES) S-Box for non-linearity (confusion) and a deterministic 1024-bit permutation table.
-* **Advanced Linear Diffusion:** Incorporates `MixBytes` (column-wise MixColumns over GF(2⁸) with branch number 5) and 1024-bit circular bit-rotations to satisfy the Strict Avalanche Criterion (SAC) in a single round.
-* **Authenticated Chaining Mode:** Operates in CBC (Cipher Chaining) mode with a cryptographically secure 512-byte random IV. Protected by an **Encrypt-then-MAC** authentication wrapper using HMAC-SHA256 with constant-time comparison to prevent timing and padding oracle attacks.
-* **Zero Dependencies:** Written entirely in pure Python using only standard library modules.
-
----
-
-## File Layout
-
-```
-├── cipher.py          # Core cipher library + CLI
-├── gui.py             # Desktop GUI (tkinter — no install needed)
-├── demo.py            # Interactive feature demonstration (CLI)
-├── avalanche_demo.py  # Round-by-round bit diffusion chart (CLI)
-├── pq_key_exchange.py # Hybrid Post-Quantum Key Agreement (KEM)
-├── test_cipher.py     # 13 automated unit tests
-├── ARCHITECTURE.md    # Detailed block cipher architecture & designs
-├── FLOWS.md           # Visual execution flows (Mermaid diagrams)
-├── BENCHMARKS.md      # Performance & post-quantum security metrics
-├── USAGE.md           # Working guide and usage manual
-├── SECURITY.md        # Pre-quantum & post-quantum analysis
-├── .gitignore
-├── LICENSE
-├── requirements.txt
-└── README.md
-```
-
----
-
-## Installation
-
-```bash
+```sh
 git clone https://github.com/Ashin-06/Dynamic-Block-Cipher.git
 cd Dynamic-Block-Cipher
-```
-
----
-
-## Usage
-
-### Desktop GUI
-```bash
 python gui.py
 ```
-Provides three interactive tabs: **Text Cipher**, **File Cipher**, and **Avalanche Effect**.
 
-### CLI — encrypt / decrypt a string
-```bash
-python cipher.py encrypt-str "Your secret message" "YourPassword123"
-# Copy the hex output, then:
-python cipher.py decrypt-str "<hex>" "YourPassword123"
+The GUI uses Tkinter (included in many Python distributions; Linux may require your distribution's Tk package). It has text, file, and avalanche tabs, background operations, password visibility controls, and copy output. Text whitespace is preserved; Clear also clears the text password. Only one operation runs at a time.
+
+## Command line
+
+Omit the password to use a hidden prompt. Encryption prompts twice to catch typing errors.
+
+```sh
+python cipher.py encrypt report.pdf
+python cipher.py decrypt report.pdf.enc -o recovered.pdf
+python cipher.py encrypt-str "Hello, world!"
+python cipher.py decrypt-str "<hex ciphertext>"
 ```
 
-### CLI — encrypt / decrypt a file
-```bash
-python cipher.py encrypt  report.pdf    "YourPassword123"
-python cipher.py decrypt  report.pdf.enc "YourPassword123"
-```
+Encryption defaults to `input.enc`; decryption defaults to `input.enc.dec`. Existing files are never overwritten. Use `-o` / `--output` to choose a new destination. Completed output is published atomically using a hard link on a compatible local filesystem; unsupported filesystems report an error without falling back to an unsafe write. Files are processed in memory, so this is intended for small educational samples.
 
-### Library usage
+String encryption prints only hex for easier scripting. A positional password remains accepted for compatibility, but may appear in shell history or process listings. Errors go to stderr with a nonzero exit code.
+
+## Python API
+
 ```python
 from cipher import FeistelCipher
 
-c = FeistelCipher("YourPassword123")          # min 8 chars
-ciphertext = c.encrypt(b"Hello, World!")
-plaintext  = c.decrypt(ciphertext)
-assert plaintext == b"Hello, World!"
+with FeistelCipher("ExamplePassword123") as cipher:
+    encrypted = cipher.encrypt(b"Hello, world!")
+    assert cipher.decrypt(encrypted) == b"Hello, world!"
 ```
 
----
+The context manager clears the mutable password buffer. Derived mutable key buffers are cleared on both success and failure. Python does not guarantee complete erasure of secret copies in memory.
 
-## Testing
+## Tests and demonstrations
 
-Run the automated test suite to verify implementation correctness:
-```bash
-python -m unittest test_cipher.py -v
+```sh
+python -m unittest discover -v
+python demo.py
+python avalanche_demo.py --trials 20
+python avalanche_demo.py --trials 20 --plot  # optional matplotlib window
 ```
 
-```
-test_avalanche_key              ... ok
-test_avalanche_plaintext        ... ok
-test_ciphertext_tampering       ... ok
-test_exact_block_boundary       ... ok
-test_non_deterministic_encryption ... ok
-test_padding_validation         ... ok
-test_roundtrip_binary_data      ... ok
-test_roundtrip_empty_input      ... ok
-test_roundtrip_long_string      ... ok
-test_roundtrip_short_string     ... ok
-test_sac_round_function         ... ok
-test_weak_password_rejected     ... ok
-test_wrong_password             ... ok
+Tests include legacy ciphertext compatibility, padding boundaries, authentication before decryption, malformed inputs, output collision protection, cleanup on exceptions, CLI prompts, and actual Tk GUI jobs. GUI tests skip if no display is available. The real hybrid exchange test skips when optional native dependencies are missing. CI covers Python 3.10–3.13 on Linux and Windows, including GUI tests with a virtual display on Linux.
 
-Ran 13 tests in 5.4s  OK
-```
+## Optional hybrid key exchange
 
-### Demos
-```bash
-python demo.py            # Comprehensive verification of all cryptographic primitives
-python avalanche_demo.py  # Run and plot bit-propagation metrics over 32 rounds
-```
+`pq_key_exchange.py` demonstrates ECDH plus ML-KEM-768. It requires `cryptography`, `liboqs-python`, and a compatible native liboqs installation with ML-KEM-768 enabled. Follow the [official liboqs Python installation guide](https://github.com/open-quantum-safe/liboqs-python#installation). This module fails closed when dependencies are missing; it has no simulated fallback. Public keys must be authenticated separately. It is not a complete secure messaging protocol.
 
----
+## Documentation
 
-## License
+- [Usage](USAGE.md): CLI and API behavior
+- [Audit](AUDIT.md): findings, fixes, and remaining limitations
+- [Security](SECURITY.md): threat model and known design weakness
+- [Architecture](ARCHITECTURE.md): educational cipher internals
+- [Flow diagrams](FLOWS.md): implementation flow
+- [Benchmarks](BENCHMARKS.md): reproducible measurements and interpretation
 
-MIT © Ashin-06
+MIT license. Copyright Ashin-06.

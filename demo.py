@@ -156,46 +156,45 @@ for size in [0, 1, 100, 511, 512, 513, 1024, 3000, 10000]:
 header("DEMO 7: File Encryption & Decryption (CLI-style)")
 
 step("Creating a sample text file and encrypting it...")
-test_file = "demo_secret.txt"
-test_content = "Classified: Project Antigravity is complete.\nDynamic Block Cipher verified.\n"
+import tempfile
+with tempfile.TemporaryDirectory(prefix="cipher-demo-") as directory:
+    test_file = os.path.join(directory, "demo_secret.txt")
+    test_content = "Classified: Project Antigravity is complete.\nDynamic Block Cipher verified.\n"
 
-with open(test_file, 'w', encoding='utf-8') as f:
-    f.write(test_content)
+    with open(test_file, 'w', encoding='utf-8') as f:
+        f.write(test_content)
 
-file_cipher = FeistelCipher("FilePassword2025")
-with open(test_file, 'rb') as f:
-    raw = f.read()
+    file_cipher = FeistelCipher("FilePassword2025")
+    with open(test_file, 'rb') as f:
+        raw = f.read()
 
-encrypted_data = file_cipher.encrypt(raw)
-enc_file = test_file + ".enc"
-with open(enc_file, 'wb') as f:
-    f.write(encrypted_data)
+    encrypted_data = file_cipher.encrypt(raw)
+    enc_file = test_file + ".enc"
+    with open(enc_file, 'wb') as f:
+        f.write(encrypted_data)
 
-info(f"Encrypted '{test_file}' ({len(raw)}B) -> '{enc_file}' ({len(encrypted_data)}B)")
+    info(f"Encrypted '{test_file}' ({len(raw)}B) -> '{enc_file}' ({len(encrypted_data)}B)")
 
-with open(enc_file, 'rb') as f:
-    read_back = f.read()
-decrypted_data = file_cipher.decrypt(read_back)
-dec_file = test_file + ".dec"
-with open(dec_file, 'wb') as f:
-    f.write(decrypted_data)
+    with open(enc_file, 'rb') as f:
+        read_back = f.read()
+    decrypted_data = file_cipher.decrypt(read_back)
+    dec_file = test_file + ".dec"
+    with open(dec_file, 'wb') as f:
+        f.write(decrypted_data)
 
-info(f"Decrypted '{enc_file}' -> '{dec_file}'")
+    info(f"Decrypted '{enc_file}' -> '{dec_file}'")
 
-with open(dec_file, 'r', encoding='utf-8') as f:
-    recovered = f.read()
+    with open(dec_file, 'r', encoding='utf-8') as f:
+        recovered = f.read()
 
-if recovered == test_content:
-    ok("File content perfectly recovered after encryption!")
-else:
-    fail("File content mismatch after encryption!")
+    if recovered == test_content:
+        ok("File content perfectly recovered after encryption!")
+    else:
+        fail("File content mismatch after encryption!")
 
-print(f"  File content:\n{col('g', chr(10).join('    ' + l for l in recovered.splitlines()))}")
+    print(f"  File content:\n{col('g', chr(10).join('    ' + l for l in recovered.splitlines()))}")
 
-# Cleanup
-for f in [test_file, enc_file, dec_file]:
-    if os.path.exists(f): os.remove(f)
-info("Test files cleaned up")
+info("Temporary demo files cleaned up")
 
 # ============================================================
 # DEMO 8 - Avalanche Effect summary
@@ -254,12 +253,12 @@ print(col('g', """
   [PASS]  SYS-7  Constant-time MAC comparison (Timing-attack resistant) active
   [PASS]  SYS-8  Key Schedule (HMAC-SHA256 counter-based subkey generator) active
   [PASS]  SYS-9  Key Derivation (PBKDF2-HMAC-SHA256 with 600,000 iterations) verified
-  [PASS]  SYS-10 PKCS#7 Padding and Exact Block-Boundary handling verified
+  [PASS]  SYS-10 Two-byte length padding and Exact Block-Boundary handling verified
   [PASS]  SYS-11 Zero-Length Payload encryption roundtrip verified
   [PASS]  SYS-12 Passphrase Strength Validation (minimum 8 characters) verified
-  [PASS]  PQ-1   Post-Quantum Security Margin (128-bit security via 256-bit key)
+  [NOTE]  PQ-1   Custom cipher has no established post-quantum security level
   [PASS]  PQ-2   High-entropy Salt and IV from OS CSPRNG verified
 """))
-print(col('c', '  Cipher is production-ready for professional symmetric encryption.'))
-print(col('c', '  Run: python -m unittest test_cipher.py  to verify all 13 tests.'))
+print(col('c', '  Educational implementation only; tests do not establish cryptographic security.'))
+print(col('c', '  Run: python -m unittest discover -v  to run all regression tests.'))
 print()

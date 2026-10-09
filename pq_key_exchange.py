@@ -6,14 +6,12 @@ This module implements a hybrid post-quantum key agreement protocol combining
 classical Elliptic Curve Diffie-Hellman (ECDH over secp256r1) with NIST FIPS 203
 standardized Module-Lattice-Based Key-Encapsulation Mechanism (ML-KEM-768, formerly Kyber).
 
-It demonstrates how two parties (Alice and Bob) can securely establish a shared
-symmetric secret key over an insecure network, retaining classical security even
-if the PQ algorithm is compromised, and PQ security even if classical ECDH is broken.
+This is an unauthenticated educational exchange, not a complete secure transport.
+Peers must authenticate public keys separately to prevent active interception.
 """
 
 import hashlib
 import hmac
-import os
 import sys
 
 # Try importing PQ and Classical cryptography libraries
@@ -21,25 +19,28 @@ HAS_OQS = False
 try:
     import oqs
     HAS_OQS = True
-except ImportError:
+except (ImportError, OSError):
     pass
 
 HAS_CRYPTOGRAPHY = False
 try:
     from cryptography.hazmat.primitives.asymmetric import ec
-    from cryptography.hazmat.primitives import hashes
     HAS_CRYPTOGRAPHY = True
-except ImportError:
+except (ImportError, OSError):
     pass
 
 class HybridKeyExchange:
     """
-    Implements a Hybrid Key Agreement protocol combining ML-KEM-768 (Kyber768)
+    Implements a Hybrid Key Agreement protocol combining ML-KEM-768
     and ECDH (secp256r1).
     """
     def __init__(self):
-        self.kem_name = "Kyber768"  # ML-KEM-768 equivalent in liboqs
-        
+        if not HAS_CRYPTOGRAPHY or not HAS_OQS:
+            raise RuntimeError("Hybrid exchange requires cryptography and liboqs-python with native liboqs. No mock fallback is provided.")
+        self.kem_name = "ML-KEM-768"
+        if self.kem_name not in oqs.get_enabled_kem_mechanisms():
+            raise RuntimeError("The installed liboqs does not enable ML-KEM-768.")
+
     def generate_keypair(self):
         """
         Generates public/private key pairs for both ECDH and ML-KEM.
@@ -51,28 +52,22 @@ class HybridKeyExchange:
         private_keys = {}
 
         # 1. Classical ECDH Generation
-        if HAS_CRYPTOGRAPHY:
-            ec_priv = ec.generate_private_key(ec.SECP256R1())
-            ec_pub = ec_priv.public_key()
-            private_keys["ec"] = ec_priv
-            # Serialized EC public key bytes
-            from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-            public_keys["ec"] = ec_pub.public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
-        else:
-            # Mock classical EC for demonstration if cryptography is missing
-            private_keys["ec"] = os.urandom(32)
-            public_keys["ec"] = os.urandom(65) # Mock public key bytes
+        ec_priv = ec.generate_private_key(ec.SECP256R1())
+        ec_pub = ec_priv.public_key()
+        private_keys["ec"] = ec_priv
+        # Serialized EC public key bytes
+        from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+        public_keys["ec"] = ec_pub.public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
 
         # 2. Post-Quantum ML-KEM Generation
-        if HAS_OQS:
-            kem = oqs.KeyEncapsulation(self.kem_name)
+        kem = oqs.KeyEncapsulation(self.kem_name)
+        try:
             pq_pub = kem.generate_keypair()
-            private_keys["pq"] = kem
-            public_keys["pq"] = pq_pub
-        else:
-            # Mock PQ for demonstration if liboqs is missing
-            private_keys["pq"] = os.urandom(32)
-            public_keys["pq"] = os.urandom(1184) # Kyber768 public key size
+        except Exception:
+            kem.free()
+            raise
+        private_keys["pq"] = kem
+        public_keys["pq"] = pq_pub
 
         return private_keys, public_keys
 
@@ -89,34 +84,23 @@ class HybridKeyExchange:
         shared_secrets = []
 
         # 1. Classical ECDH Shared Secret
-        if HAS_CRYPTOGRAPHY:
-            # Generate Bob's ephemeral EC key
-            bob_ec_priv = ec.generate_private_key(ec.SECP256R1())
-            from cryptography.hazmat.primitives.serialization import load_der_public_key, Encoding, PublicFormat
-            alice_ec_pub = load_der_public_key(peer_public_keys["ec"])
-            
-            # Compute EC shared secret
-            ec_secret = bob_ec_priv.exchange(ec.ECDH(), alice_ec_pub)
-            shared_secrets.append(ec_secret)
-            
-            # Bob's EC public key acts as the ciphertext/ephemeral key for Alice to do the exchange
-            ciphertexts["ec"] = bob_ec_priv.public_key().public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
-        else:
-            # Mock classical EC secret
-            shared_secrets.append(os.urandom(32))
-            ciphertexts["ec"] = os.urandom(65)
+        # Generate Bob's ephemeral EC key
+        bob_ec_priv = ec.generate_private_key(ec.SECP256R1())
+        from cryptography.hazmat.primitives.serialization import load_der_public_key, Encoding, PublicFormat
+        alice_ec_pub = load_der_public_key(peer_public_keys["ec"])
+
+        # Compute EC shared secret
+        ec_secret = bob_ec_priv.exchange(ec.ECDH(), alice_ec_pub)
+        shared_secrets.append(ec_secret)
+
+        # Bob's EC public key acts as the ciphertext/ephemeral key for Alice to do the exchange
+        ciphertexts["ec"] = bob_ec_priv.public_key().public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
 
         # 2. Post-Quantum KEM Shared Secret
-        if HAS_OQS:
-            with oqs.KeyEncapsulation(self.kem_name) as client:
-                pq_ciphertext, pq_secret = client.encap_secret(peer_public_keys["pq"])
-                shared_secrets.append(pq_secret)
-                ciphertexts["pq"] = pq_ciphertext
-        else:
-            # Mock PQ KEM secret: derive deterministically from peer public key for demo matching
-            pq_secret = hashlib.sha256(peer_public_keys["pq"] + b"mock_kem_salt").digest()
+        with oqs.KeyEncapsulation(self.kem_name) as client:
+            pq_ciphertext, pq_secret = client.encap_secret(peer_public_keys["pq"])
             shared_secrets.append(pq_secret)
-            ciphertexts["pq"] = peer_public_keys["pq"]
+            ciphertexts["pq"] = pq_ciphertext
 
         # 3. Hybrid Combination via HKDF-SHA256
         combined_secret = self._combine_secrets(shared_secrets)
@@ -135,28 +119,20 @@ class HybridKeyExchange:
         shared_secrets = []
 
         # 1. Decapsulate Classical ECDH
-        if HAS_CRYPTOGRAPHY:
-            from cryptography.hazmat.primitives.serialization import load_der_public_key
-            bob_ec_pub = load_der_public_key(peer_ciphertexts["ec"])
-            alice_ec_priv = private_keys["ec"]
-            
-            ec_secret = alice_ec_priv.exchange(ec.ECDH(), bob_ec_pub)
-            shared_secrets.append(ec_secret)
-        else:
-            # Mock classical EC secret
-            shared_secrets.append(b"mock_ec_shared_secret_value")
+        from cryptography.hazmat.primitives.serialization import load_der_public_key
+        bob_ec_pub = load_der_public_key(peer_ciphertexts["ec"])
+        alice_ec_priv = private_keys["ec"]
+
+        ec_secret = alice_ec_priv.exchange(ec.ECDH(), bob_ec_pub)
+        shared_secrets.append(ec_secret)
 
         # 2. Decapsulate Post-Quantum KEM
-        if HAS_OQS:
-            kem = private_keys["pq"]
+        kem = private_keys["pq"]
+        try:
             pq_secret = kem.decap_secret(peer_ciphertexts["pq"])
-            # Clean up the C resources allocated by liboqs
+        finally:
             kem.free()
-            shared_secrets.append(pq_secret)
-        else:
-            # Mock PQ KEM secret: matches Bob's deterministic derivation from public key
-            pq_secret = hashlib.sha256(peer_ciphertexts["pq"] + b"mock_kem_salt").digest()
-            shared_secrets.append(pq_secret)
+        shared_secrets.append(pq_secret)
 
         # 3. Hybrid Combination via HKDF-SHA256
         combined_secret = self._combine_secrets(shared_secrets)
@@ -165,15 +141,14 @@ class HybridKeyExchange:
     def _combine_secrets(self, secrets: list) -> bytes:
         """
         Combine multiple shared secrets using HKDF-SHA256 extraction and expansion.
-        Guarantees that the resulting key is secure as long as AT LEAST ONE of the
-        constituent secrets is secure.
+        This demonstration does not establish a security proof for the protocol.
         """
         # Concatenate all raw secrets
         ikm = b"".join(secrets)
-        
+
         # HKDF-Extract
         prk = hmac.new(b"\x00" * 32, ikm, hashlib.sha256).digest()
-        
+
         # HKDF-Expand to 32 bytes (256-bit symmetric key)
         info = b"hybrid_pq_ecdh_agreement_v1"
         okm = hmac.new(prk, info + b"\x01", hashlib.sha256).digest()
@@ -186,15 +161,12 @@ def main():
     print(f"Post-Quantum library (liboqs-python): {'[DETECTED]' if HAS_OQS else '[NOT FOUND]'}")
     print(f"Classical cryptography library:       {'[DETECTED]' if HAS_CRYPTOGRAPHY else '[NOT FOUND]'}")
     print("-" * 60)
-    
-    if not HAS_OQS or not HAS_CRYPTOGRAPHY:
-        print("[WARNING] Missing libraries. Running protocol with Mock simulation.")
-        print("To install dependencies on Windows, run:")
-        print("  pip install liboqs-python cryptography")
-        print("-" * 60)
 
-    # Initialize protocol
-    exchange = HybridKeyExchange()
+    try:
+        exchange = HybridKeyExchange()
+    except RuntimeError as exc:
+        print(f"Unavailable: {exc}", file=sys.stderr)
+        return 1
 
     # Step 1: Alice generates her key pair
     print("Step 1: Alice generates public/private keypair...")
@@ -208,28 +180,28 @@ def main():
     bob_ciphertexts, bob_secret = exchange.encapsulate(alice_pub)
     print(f"  Bob EC Ciphertext Size: {len(bob_ciphertexts['ec'])} bytes")
     print(f"  Bob PQ Ciphertext Size: {len(bob_ciphertexts['pq'])} bytes")
-    print(f"  Bob's Derived Secret:   {bob_secret.hex()[:32]}...")
+    print("  Bob derived a 32-byte shared secret.")
     print()
 
     # Step 3: Alice receives Bob's ciphertexts and decapsulates
     print("Step 3: Alice decapsulates Bob's ciphertexts...")
     alice_secret = exchange.decapsulate(alice_priv, bob_ciphertexts)
-    print(f"  Alice's Derived Secret: {alice_secret.hex()[:32]}...")
+    print("  Alice derived a 32-byte shared secret.")
     print()
 
     # Step 4: Verification
     if alice_secret == bob_secret:
         print("\033[92m[SUCCESS] Key Agreement Successful! secrets match perfectly.\033[0m")
-        print(f"  Established Shared Secret (256-bit): {alice_secret.hex()}")
-        
+
+
         # Demonstrate initializing FeistelCipher with the derived key
         try:
             from cipher import FeistelCipher
             print("-" * 60)
             print("Step 5: Initialize zero-dependency FeistelCipher with shared secret...")
-            
+
             # Using derived secret hex as password string
-            cipher = FeistelCipher(alice_secret.hex()[:16])
+            cipher = FeistelCipher(alice_secret.hex())
             msg = b"Secure post-quantum message channel active!"
             ct = cipher.encrypt(msg)
             pt = cipher.decrypt(ct)
@@ -237,10 +209,11 @@ def main():
             print(f"  Ciphertext : {ct.hex()[:64]}...")
             print(f"  Decrypted  : {pt.decode('utf-8')}")
             print("\033[92m[PASS] Integrated verification successful!\033[0m")
-        except ImportError:
+        except (ImportError, OSError):
             print("  (cipher.py not found in path, skipping integration test)")
     else:
         print("\033[91m[FAILURE] Secrets mismatch!\033[0m")
+        return 1
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

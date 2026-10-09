@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
 """
 gui.py  ─  Dynamic Block Cipher GUI
-Secure 4-branch Generalized Feistel Network with AES S-Box, CBC, PBKDF2, HMAC-SHA256.
+Experimental 4-branch Generalized Feistel Network with AES S-Box, CBC, PBKDF2, HMAC-SHA256.
 
 Run:  python gui.py
-Requires: Python 3.8+  (tkinter is bundled with standard Python — no pip install needed)
+Requires: Python 3.10+ and tkinter (availability depends on Python distribution).
 """
 
 import tkinter as tk
 from tkinter import ttk, filedialog, scrolledtext
 import threading
+import queue
 import os
 import time
 
 try:
     from cipher import FeistelCipher, derive_keys, derive_subkeys, \
-                       round_function, xor_bytes
+                       round_function, xor_bytes, write_output
 except ImportError:
     import sys
     print("ERROR: cipher.py not found. Place gui.py in the same folder as cipher.py.")
@@ -69,12 +70,46 @@ def get_round_states(block: bytes, subkeys: list) -> list:
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Dynamic Block Cipher  ─  Secure GFN v2")
+        self.title("Dynamic Block Cipher  ─  Experimental GFN v2")
         self.geometry("940x700")
         self.minsize(820, 580)
         self.configure(bg=BG)
         self._apply_style()
         self._build_ui()
+        self._events = queue.Queue()
+        self._busy = False
+        self._poll_id = self.after(40, self._drain_events)
+
+    def destroy(self):
+        if hasattr(self, "_poll_id"):
+            self.after_cancel(self._poll_id)
+        super().destroy()
+
+    def _post(self, callback, *args, **kwargs):
+        self._events.put((callback, args, kwargs))
+
+    def _drain_events(self):
+        try:
+            while True:
+                callback, args, kwargs = self._events.get_nowait()
+                callback(*args, **kwargs)
+        except queue.Empty:
+            pass
+        self._poll_id = self.after(40, self._drain_events)
+
+    def _start_job(self, work):
+        self._busy = True
+        def run():
+            try:
+                work()
+            except Exception as exc:
+                self._post(self._set_status, str(exc), RED)
+            finally:
+                self._post(self._finish_job)
+        threading.Thread(target=run, daemon=True).start()
+
+    def _finish_job(self):
+        self._busy = False
 
     # ── ttk style ─────────────────────────────────────────────────────────────
     def _apply_style(self) -> None:
@@ -121,7 +156,7 @@ class App(tk.Tk):
         # header bar
         hdr = tk.Frame(self, bg=BG2, height=54)
         hdr.pack(fill="x")
-        tk.Label(hdr, text="🔒  Dynamic Block Cipher  ─  Secure GFN v2",
+        tk.Label(hdr, text="🔒  Dynamic Block Cipher  ─  Experimental GFN v2",
                  bg=BG2, fg=ACCENT2,
                  font=("Segoe UI", 14, "bold")).pack(side="left", padx=22, pady=12)
         tk.Label(hdr,
@@ -145,7 +180,7 @@ class App(tk.Tk):
         self._build_ava_tab()
 
         # status bar
-        self._status_var = tk.StringVar(value="Ready")
+        self._status_var = tk.StringVar(value="Educational cipher — not independently reviewed")
         sb = tk.Frame(self, bg=BG2, height=28)
         sb.pack(fill="x")
         self._status_lbl = tk.Label(
@@ -226,7 +261,7 @@ class App(tk.Tk):
                  bg=BG, fg=FG2, font=FONT_B).pack(side="left")
         ttk.Button(hdr_out, text="📋 Copy",
                    command=lambda: self._clipboard(
-                       self._txt_out.get("1.0", "end").strip())
+                       self._txt_out.get("1.0", "end-1c"))
                    ).pack(side="right")
 
         self._txt_out = self._make_text_box(panes, fg=GREEN, state="disabled", height=14)
@@ -238,8 +273,10 @@ class App(tk.Tk):
         self._txt_info.pack(anchor="w", padx=16, pady=(0, 6))
 
     def _text_encrypt(self) -> None:
+        if self._busy:
+            return self._set_status("An operation is already running.", YELLOW)
         pw  = self._txt_pw.get()
-        src = self._txt_in.get("1.0", "end").strip()
+        src = self._txt_in.get("1.0", "end-1c")
         if not src:
             return self._set_status("Enter some text to encrypt.", YELLOW)
         try:
@@ -252,20 +289,24 @@ class App(tk.Tk):
                 t0  = time.time()
                 enc = c.encrypt(src.encode("utf-8"))
                 dt  = time.time() - t0
-                self._txt_out_write(enc.hex(), GREEN)
-                self._txt_info.config(
+                self._post(self._txt_out_write, enc.hex(), GREEN)
+                self._post(self._txt_info.config,
                     text=f"  {len(src.encode()):,} B  →  {len(enc):,} B ciphertext  "
-                          f"|  {dt:.3f} s  |  {len(enc) // 512} GFN block(s)")
-                self._set_status("Encrypted successfully.", GREEN)
+                          f"|  {dt:.3f} s  |  {(len(enc) - 560) // 512} GFN block(s)")
+                self._post(self._set_status, "Encrypted successfully.", GREEN)
             except Exception as e:
-                self._set_status(str(e), RED)
+                self._post(self._set_status, str(e), RED)
+            finally:
+                c.clear()
 
-        threading.Thread(target=_run, daemon=True).start()
+        self._start_job(_run)
         self._set_status("Encrypting…", YELLOW)
 
     def _text_decrypt(self) -> None:
+        if self._busy:
+            return self._set_status("An operation is already running.", YELLOW)
         pw  = self._txt_pw.get()
-        src = self._txt_in.get("1.0", "end").strip().replace("\n", "").replace(" ", "")
+        src = self._txt_in.get("1.0", "end-1c").replace("\n", "").replace(" ", "")
         if not src:
             return self._set_status("Paste hex ciphertext to decrypt.", YELLOW)
         try:
@@ -279,21 +320,26 @@ class App(tk.Tk):
                 raw = bytes.fromhex(src)
                 dec = c.decrypt(raw)
                 dt  = time.time() - t0
-                self._txt_out_write(dec.decode("utf-8"), GREEN)
-                self._txt_info.config(
+                self._post(self._txt_out_write, dec.decode("utf-8"), GREEN)
+                self._post(self._txt_info.config,
                     text=f"  {len(raw):,} B  →  {len(dec):,} B plaintext  "
                           f"|  {dt:.3f} s  |  HMAC VERIFIED ✓")
-                self._set_status("Decrypted and integrity verified.", GREEN)
+                self._post(self._set_status, "Decrypted and integrity verified.", GREEN)
             except ValueError as e:
-                self._txt_out_write(f"ERROR: {e}", RED)
-                self._set_status(str(e), RED)
+                self._post(self._txt_out_write, f"ERROR: {e}", RED)
+                self._post(self._set_status, str(e), RED)
             except Exception as e:
-                self._set_status(f"Error: {e}", RED)
+                self._post(self._set_status, f"Error: {e}", RED)
+            finally:
+                c.clear()
 
-        threading.Thread(target=_run, daemon=True).start()
+        self._start_job(_run)
         self._set_status("Decrypting…", YELLOW)
 
     def _text_clear(self) -> None:
+        if self._busy:
+            return self._set_status("Wait for the current operation to finish.", YELLOW)
+        self._txt_pw.set("")
         self._txt_in.delete("1.0", "end")
         self._txt_out.config(state="normal")
         self._txt_out.delete("1.0", "end")
@@ -359,6 +405,8 @@ class App(tk.Tk):
         self._file_log.config(state="disabled")
 
     def _file_encrypt(self) -> None:
+        if self._busy:
+            return self._set_status("An operation is already running.", YELLOW)
         pw   = self._file_pw.get()
         path = self._file_path.get().strip()
         if not path or not os.path.exists(path):
@@ -369,30 +417,32 @@ class App(tk.Tk):
             return self._set_status(str(e), RED)
 
         def _run():
-            self._file_prog.start(10)
+            self._post(self._file_prog.start, 10)
             try:
                 t0 = time.time()
                 with open(path, "rb") as f:
                     data = f.read()
-                self._file_log_write(f"[READ]  {path}  ({len(data):,} bytes)")
+                self._post(self._file_log_write, f"[READ]  {path}  ({len(data):,} bytes)")
                 enc      = c.encrypt(data)
                 out_path = path + ".enc"
-                with open(out_path, "wb") as f:
-                    f.write(enc)
+                write_output(out_path, enc)
                 dt = time.time() - t0
-                self._file_log_write(
+                self._post(self._file_log_write,
                     f"[OK]    Encrypted  →  {out_path}  ({len(enc):,} bytes)  |  {dt:.3f}s")
-                self._set_status(f"Encrypted → {os.path.basename(out_path)}", GREEN)
+                self._post(self._set_status, f"Encrypted → {os.path.basename(out_path)}", GREEN)
             except Exception as e:
-                self._file_log_write(f"[ERROR] {e}")
-                self._set_status(str(e), RED)
+                self._post(self._file_log_write, f"[ERROR] {e}")
+                self._post(self._set_status, str(e), RED)
             finally:
-                self._file_prog.stop()
+                c.clear()
+                self._post(self._file_prog.stop)
 
-        threading.Thread(target=_run, daemon=True).start()
+        self._start_job(_run)
         self._set_status("Encrypting file…", YELLOW)
 
     def _file_decrypt(self) -> None:
+        if self._busy:
+            return self._set_status("An operation is already running.", YELLOW)
         pw   = self._file_pw.get()
         path = self._file_path.get().strip()
         if not path or not os.path.exists(path):
@@ -403,31 +453,31 @@ class App(tk.Tk):
             return self._set_status(str(e), RED)
 
         def _run():
-            self._file_prog.start(10)
+            self._post(self._file_prog.start, 10)
             try:
                 t0 = time.time()
                 with open(path, "rb") as f:
                     data = f.read()
-                self._file_log_write(f"[READ]  {path}  ({len(data):,} bytes)")
+                self._post(self._file_log_write, f"[READ]  {path}  ({len(data):,} bytes)")
                 dec      = c.decrypt(data)
-                out_path = path[:-4] if path.endswith(".enc") else path + ".dec"
-                with open(out_path, "wb") as f:
-                    f.write(dec)
+                out_path = path + ".dec"
+                write_output(out_path, dec)
                 dt = time.time() - t0
-                self._file_log_write(
+                self._post(self._file_log_write,
                     f"[OK]    Decrypted  →  {out_path}  ({len(dec):,} bytes)  "
                     f"|  {dt:.3f}s  |  HMAC VERIFIED ✓")
-                self._set_status(f"Decrypted → {os.path.basename(out_path)}", GREEN)
+                self._post(self._set_status, f"Decrypted → {os.path.basename(out_path)}", GREEN)
             except ValueError as e:
-                self._file_log_write(f"[FAIL]  {e}")
-                self._set_status(str(e), RED)
+                self._post(self._file_log_write, f"[FAIL]  {e}")
+                self._post(self._set_status, str(e), RED)
             except Exception as e:
-                self._file_log_write(f"[ERROR] {e}")
-                self._set_status(str(e), RED)
+                self._post(self._file_log_write, f"[ERROR] {e}")
+                self._post(self._set_status, str(e), RED)
             finally:
-                self._file_prog.stop()
+                c.clear()
+                self._post(self._file_prog.stop)
 
-        threading.Thread(target=_run, daemon=True).start()
+        self._start_job(_run)
         self._set_status("Decrypting file…", YELLOW)
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -439,8 +489,8 @@ class App(tk.Tk):
         tk.Label(p, text="Avalanche Effect — Bit Diffusion Over 32 Rounds",
                  bg=BG, fg=ACCENT2, font=FONT_BIG).pack(pady=(14, 2))
         tk.Label(p,
-                 text="Flip 1 bit in the plaintext or key — a strong cipher diffuses it "
-                      "to ~50 % (2048 / 4096) of all output bits by round 8–12.",
+                 text="Explore sampled bit differences after a one-bit change. "
+                      "A result near 50% does not prove security; this design has a known weakness.",
                  bg=BG, fg=FG2, font=FONT, wraplength=760).pack()
 
         ttk.Button(p, text="▶   Run Avalanche Test",
@@ -453,9 +503,11 @@ class App(tk.Tk):
         self._ava_canvas.pack(fill="both", expand=True, padx=16, pady=12)
 
     def _run_ava(self) -> None:
+        if self._busy:
+            return self._set_status("An operation is already running.", YELLOW)
         def _run():
-            self._ava_prog.start(8)
-            self._ava_canvas.delete("all")
+            self._post(self._ava_prog.start, 8)
+            self._post(self._ava_canvas.delete, "all")
             try:
                 pw   = "AvalancheDemo2025"
                 salt = os.urandom(16)
@@ -474,11 +526,11 @@ class App(tk.Tk):
                 pt_d  = [hamming(a, b) for a, b in zip(s_orig, s_pt)]
                 key_d = [hamming(a, b) for a, b in zip(s_orig, s_key)]
 
-                self.after(0, lambda: self._draw_ava(pt_d, key_d))
+                self._post(self._draw_ava, pt_d, key_d)
             finally:
-                self._ava_prog.stop()
+                self._post(self._ava_prog.stop)
 
-        threading.Thread(target=_run, daemon=True).start()
+        self._start_job(_run)
 
     def _draw_ava(self, pt_d: list, key_d: list) -> None:
         c  = self._ava_canvas

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Secure Custom Generalized Feistel Block Cipher (GFN)
-This module implements a cryptographically secure 4-branch Generalized Feistel Network
+Experimental Generalized Feistel Block Cipher (GFN)
+This educational module implements an unreviewed 4-branch Generalized Feistel Network
 using S-boxes, bit permutations, CBC mode, PBKDF2-HMAC-SHA256, and Encrypt-then-MAC.
 """
 
@@ -11,6 +11,9 @@ import hmac
 import hashlib
 import argparse
 import random
+import getpass
+import tempfile
+from pathlib import Path
 
 # Standard AES S-Box for non-linearity (confusion)
 SBOX = [
@@ -47,6 +50,8 @@ class FastPermuter:
         # Thus, permute_bits actually applies the inverse of BIT_PERMUTATION.
         # This design choice accelerates bit shuffling. Correctness is fully preserved
         # because GFN decryption mirrors GFN encryption structurally.
+        if len(perm_table) != 1024 or set(perm_table) != set(range(1024)):
+            raise ValueError("Permutation must contain each position 0..1023 once.")
         inv_perm = [0] * 1024
         for i, pos in enumerate(perm_table):
             inv_perm[pos] = i
@@ -65,6 +70,8 @@ class FastPermuter:
             self.lookup.append(byte_lookups)
 
     def permute(self, block_bytes: bytes) -> bytes:
+        if len(block_bytes) != 128:
+            raise ValueError("Sub-block must be exactly 128 bytes.")
         out_val = 0
         for byte_idx, val in enumerate(block_bytes):
             out_val |= self.lookup[byte_idx][val]
@@ -75,7 +82,8 @@ _PERMUTER = FastPermuter(BIT_PERMUTATION)
 
 def permute_bits(block_bytes: bytes, perm_table: list = None) -> bytes:
     """Permute the bits of a 128-byte (1024-bit) block using the precomputed fast permuter."""
-    return _PERMUTER.permute(block_bytes)
+    permuter = _PERMUTER if perm_table is None or perm_table == BIT_PERMUTATION else FastPermuter(perm_table)
+    return permuter.permute(block_bytes)
 
 # ── GF(2^8) lookup tables for MixBytes ───────────────────────────────────────
 # Reduction polynomial: x^8 + x^4 + x^3 + x + 1  (AES / Rijndael)
@@ -88,7 +96,8 @@ def mix_bytes(block_bytes: bytes) -> bytes:
 
     First applies AES-style MixColumns to every non-overlapping 4-byte group of the
     128-byte sub-block. Then, applies wide-block circular bit rotations and XORs
-    across the entire 1024-bit block to achieve full block-wide diffusion (SAC).
+    across the 1024-bit block. This legacy layer has a repeated-output weakness;
+    see SECURITY.md. Average avalanche statistics do not establish security.
     """
     out = bytearray(128)
     for i in range(0, 128, 4):
@@ -100,18 +109,18 @@ def mix_bytes(block_bytes: bytes) -> bytes:
         out[i + 1] = a           ^ _GF_MUL2[b] ^ _GF_MUL3[c] ^ d
         out[i + 2] = a           ^ b           ^ _GF_MUL2[c] ^ _GF_MUL3[d]
         out[i + 3] = _GF_MUL3[a] ^ b           ^ c           ^ _GF_MUL2[d]
-    
+
     # 1024-bit wide-block circular rotations and XORs
     val = int.from_bytes(out, byteorder='big')
     mask = (1 << 1024) - 1
-    
+
     val ^= (val >> 512) | ((val << 512) & mask)
     val ^= (val >> 256) | ((val << 768) & mask)
     val ^= (val >> 128) | ((val << 896) & mask)
     val ^= (val >> 64) | ((val << 960) & mask)
     val ^= (val >> 17) | ((val << (1024 - 17)) & mask)
     val ^= (val >> 251) | ((val << (1024 - 251)) & mask)
-    
+
     return val.to_bytes(128, byteorder='big')
 
 def derive_bit_permutation(k_enc):
@@ -151,6 +160,8 @@ def round_function(X: bytes, K: bytes, permuter=None) -> bytes:
 
 def xor_bytes(a, b):
     """Helper to XOR two byte sequences of equal length."""
+    if len(a) != len(b):
+        raise ValueError("XOR operands must have equal length.")
     return bytes(x ^ y for x, y in zip(a, b))
 
 def derive_keys(password, salt: bytes, iterations: int = 600000) -> tuple:
@@ -158,10 +169,8 @@ def derive_keys(password, salt: bytes, iterations: int = 600000) -> tuple:
     Derive a 256-bit encryption key and a 256-bit authentication key from
     a user password (str, bytes, or bytearray) using PBKDF2-HMAC-SHA256.
 
-    Iteration count: 600 000  (NIST SP 800-132 draft update 2023 recommendation
-    for PBKDF2-HMAC-SHA256 with interactive logins).
-    Approximate cost: ~240 ms on modern hardware — makes each password-guess
-    attempt cost ~240 ms even with the fastest GPU clusters.
+    Default iteration count: 600,000. Actual cost depends on hardware;
+    password entropy still limits resistance to guessing.
 
     Returns
     -------
@@ -198,6 +207,8 @@ def encrypt_block(block, subkeys, permuter=None):
     """
     Encrypt a single 512-byte (4096-bit) block using 32-round 4-branch Type-II GFN.
     """
+    if len(block) != 512 or len(subkeys) != 64 or any(len(k) != 128 for k in subkeys):
+        raise ValueError("Expected a 512-byte block and 64 subkeys of 128 bytes.")
     # Split into 4 sub-blocks of 128 bytes (1024 bits) each
     X = [
         block[0:128],
@@ -229,6 +240,8 @@ def decrypt_block(block, subkeys, permuter=None):
     """
     Decrypt a single 512-byte (4096-bit) block by running GFN in reverse.
     """
+    if len(block) != 512 or len(subkeys) != 64 or any(len(k) != 128 for k in subkeys):
+        raise ValueError("Expected a 512-byte block and 64 subkeys of 128 bytes.")
     # Split into 4 sub-blocks
     X = [
         block[0:128],
@@ -256,6 +269,8 @@ def decrypt_block(block, subkeys, permuter=None):
 
 def pad(data, block_size=512):
     """Pad data using a 2-byte big-endian length indicator at the end."""
+    if not isinstance(block_size, int) or not 2 <= block_size <= 65534:
+        raise ValueError("Block size must be between 2 and 65534.")
     n = len(data)
     pad_len = block_size - (n % block_size)
     if pad_len < 2:
@@ -265,6 +280,10 @@ def pad(data, block_size=512):
 
 def unpad(data, block_size=512):
     """Remove padding using the 2-byte big-endian length indicator."""
+    if not isinstance(block_size, int) or not 2 <= block_size <= 65534:
+        raise ValueError("Block size must be between 2 and 65534.")
+    if len(data) % block_size:
+        raise ValueError("Padded data must contain complete blocks.")
     if len(data) < 2:
         raise ValueError("Data is too short to contain padding.")
     pad_len = int.from_bytes(data[-2:], byteorder='big')
@@ -285,9 +304,11 @@ class FeistelCipher:
     when no longer needed.
     """
     def __init__(self, password):
+        if not isinstance(password, str):
+            raise TypeError('Password must be a string.')
         if len(password) < 8:
             raise ValueError("Password must be at least 8 characters long.")
-        # Store password as a mutable bytearray to prevent immutable string memory persistence
+        # Keep a mutable copy for best-effort clearing; other Python copies may persist.
         self._password = bytearray(password.encode('utf-8'))
 
     def clear(self):
@@ -296,6 +317,14 @@ class FeistelCipher:
             for i in range(len(self._password)):
                 self._password[i] = 0
             self._password = None
+
+    def __enter__(self):
+        if self._password is None:
+            raise ValueError("Cipher has been cleared.")
+        return self
+
+    def __exit__(self, *exc):
+        self.clear()
 
     def __del__(self):
         self.clear()
@@ -309,40 +338,39 @@ class FeistelCipher:
             raise ValueError("Cipher has been cleared.")
         salt = os.urandom(16)
         k_enc, k_mac = derive_keys(self._password, salt)
-        subkeys = derive_subkeys(k_enc)
+        subkeys = []
+        try:
+            subkeys = derive_subkeys(k_enc)
 
-        # Generate session key-dependent FastPermuter
-        bit_perm = derive_bit_permutation(k_enc)
-        permuter = FastPermuter(bit_perm)
+            # Generate session key-dependent FastPermuter
+            bit_perm = derive_bit_permutation(k_enc)
+            permuter = FastPermuter(bit_perm)
 
-        # Generate 512-byte random Initialization Vector (IV)
-        iv = os.urandom(512)
+            # Generate 512-byte random Initialization Vector (IV)
+            iv = os.urandom(512)
 
-        # Pad plaintext to 512-byte boundaries
-        padded_data = pad(plaintext_bytes)
+            # Pad plaintext to 512-byte boundaries
+            padded_data = pad(plaintext_bytes)
 
-        # Cipher Block Chaining (CBC) Encryption
-        ciphertext_blocks = []
-        prev = iv
-        for i in range(0, len(padded_data), 512):
-            block = padded_data[i:i+512]
-            mixed = xor_bytes(block, prev)
-            enc = encrypt_block(mixed, subkeys, permuter)
-            ciphertext_blocks.append(enc)
-            prev = enc
+            # Cipher Block Chaining (CBC) Encryption
+            ciphertext_blocks = []
+            prev = iv
+            for i in range(0, len(padded_data), 512):
+                block = padded_data[i:i+512]
+                mixed = xor_bytes(block, prev)
+                enc = encrypt_block(mixed, subkeys, permuter)
+                ciphertext_blocks.append(enc)
+                prev = enc
 
-        encrypted_payload = salt + iv + b"".join(ciphertext_blocks)
+            encrypted_payload = salt + iv + b"".join(ciphertext_blocks)
 
-        # Compute HMAC tag over the entire encrypted payload (Encrypt-then-MAC)
-        tag = hmac.new(k_mac, encrypted_payload, hashlib.sha256).digest()
+            # Compute HMAC tag over the entire encrypted payload (Encrypt-then-MAC)
+            tag = hmac.new(k_mac, encrypted_payload, hashlib.sha256).digest()
 
-        # Zero out sensitive key material in memory
-        for i in range(len(k_enc)): k_enc[i] = 0
-        for i in range(len(k_mac)): k_mac[i] = 0
-        for sk in subkeys:
-            for i in range(len(sk)): sk[i] = 0
-
-        return encrypted_payload + tag
+            return encrypted_payload + tag
+        finally:
+            for key in [k_enc, k_mac, *subkeys]:
+                key[:] = b"\x00" * len(key)
 
     def decrypt(self, ciphertext_bytes):
         """
@@ -351,138 +379,103 @@ class FeistelCipher:
         """
         if self._password is None:
             raise ValueError("Cipher has been cleared.")
-        if len(ciphertext_bytes) < 16 + 512 + 32:
+        if len(ciphertext_bytes) < 16 + 512 + 512 + 32:
             raise ValueError("Ciphertext is too short.")
 
+        if (len(ciphertext_bytes) - 560) % 512:
+            raise ValueError("Ciphertext must contain complete 512-byte blocks.")
         salt = ciphertext_bytes[0:16]
         mac_tag = ciphertext_bytes[-32:]
         encrypted_payload = ciphertext_bytes[:-32]
 
         k_enc, k_mac = derive_keys(self._password, salt)
+        subkeys = []
+        try:
 
-        # Verify HMAC tag first (constant-time comparison)
-        expected_tag = hmac.new(k_mac, encrypted_payload, hashlib.sha256).digest()
-        if not hmac.compare_digest(mac_tag, expected_tag):
-            # Scrub key material before raising error
-            for i in range(len(k_enc)): k_enc[i] = 0
-            for i in range(len(k_mac)): k_mac[i] = 0
-            raise ValueError("Integrity check failed. Incorrect password or data tampered.")
+            # Verify HMAC tag first (constant-time comparison)
+            expected_tag = hmac.new(k_mac, encrypted_payload, hashlib.sha256).digest()
+            if not hmac.compare_digest(mac_tag, expected_tag):
+                raise ValueError("Integrity check failed. Incorrect password or data tampered.")
 
-        iv = encrypted_payload[16:528]
-        ciphertext_blocks = encrypted_payload[528:]
+            iv = encrypted_payload[16:528]
+            ciphertext_blocks = encrypted_payload[528:]
 
-        subkeys = derive_subkeys(k_enc)
+            subkeys = derive_subkeys(k_enc)
 
-        # Generate session key-dependent FastPermuter
-        bit_perm = derive_bit_permutation(k_enc)
-        permuter = FastPermuter(bit_perm)
+            # Generate session key-dependent FastPermuter
+            bit_perm = derive_bit_permutation(k_enc)
+            permuter = FastPermuter(bit_perm)
 
-        # CBC Decryption
-        decrypted_blocks = []
-        prev = iv
-        for i in range(0, len(ciphertext_blocks), 512):
-            block = ciphertext_blocks[i:i+512]
-            dec = decrypt_block(block, subkeys, permuter)
-            plain = xor_bytes(dec, prev)
-            decrypted_blocks.append(plain)
-            prev = block
+            # CBC Decryption
+            decrypted_blocks = []
+            prev = iv
+            for i in range(0, len(ciphertext_blocks), 512):
+                block = ciphertext_blocks[i:i+512]
+                dec = decrypt_block(block, subkeys, permuter)
+                plain = xor_bytes(dec, prev)
+                decrypted_blocks.append(plain)
+                prev = block
 
-        # Zero out sensitive key material in memory
-        for i in range(len(k_enc)): k_enc[i] = 0
-        for i in range(len(k_mac)): k_mac[i] = 0
-        for sk in subkeys:
-            for i in range(len(sk)): sk[i] = 0
+            padded_plaintext = b"".join(decrypted_blocks)
+            return unpad(padded_plaintext)
+        finally:
+            for key in [k_enc, k_mac, *subkeys]:
+                key[:] = b"\x00" * len(key)
 
-        padded_plaintext = b"".join(decrypted_blocks)
-        return unpad(padded_plaintext)
-
-# --- Command Line Interface ---
-
-def main():
-    parser = argparse.ArgumentParser(description="Secure Custom Feistel Cipher CLI")
-    subparsers = parser.add_subparsers(dest="command", help="Commands")
-
-    # Encrypt file
-    enc_parser = subparsers.add_parser("encrypt", help="Encrypt a file")
-    enc_parser.add_argument("file", help="Path to file to encrypt")
-    enc_parser.add_argument("password", help="Password for encryption")
-
-    # Decrypt file
-    dec_parser = subparsers.add_parser("decrypt", help="Decrypt a file")
-    dec_parser.add_argument("file", help="Path to file to decrypt")
-    dec_parser.add_argument("password", help="Password for decryption")
-
-    # Encrypt string
-    enc_str_parser = subparsers.add_parser("encrypt-str", help="Encrypt a string")
-    enc_str_parser.add_argument("text", help="Text string to encrypt")
-    enc_str_parser.add_argument("password", help="Password for encryption")
-
-    # Decrypt string
-    dec_str_parser = subparsers.add_parser("decrypt-str", help="Decrypt a hex-encoded cipher string")
-    dec_str_parser.add_argument("hex_cipher", help="Hex-encoded encrypted payload")
-    dec_str_parser.add_argument("password", help="Password for decryption")
-
-    args = parser.parse_args()
-
-    if not args.command:
-        parser.print_help()
-        sys.exit(1)
-
+def write_output(path, data):
+    """Publish a complete file without overwriting an existing destination."""
+    path = Path(path)
+    fd, temporary = tempfile.mkstemp(prefix=".cipher-", dir=path.absolute().parent)
     try:
-        if args.command == "encrypt":
-            if not os.path.exists(args.file):
-                print(f"Error: File {args.file} not found.")
-                sys.exit(1)
-            with open(args.file, "rb") as f:
-                data = f.read()
-            cipher = FeistelCipher(args.password)
-            encrypted = cipher.encrypt(data)
-            output_file = args.file + ".enc"
-            with open(output_file, "wb") as f:
-                f.write(encrypted)
-            print(f"Successfully encrypted {args.file} to {output_file}")
+        with os.fdopen(fd, "wb") as output:
+            output.write(data)
+            output.flush()
+            os.fsync(output.fileno())
+        # Linking is atomic and fails if the destination already exists.
+        os.link(temporary, path)
+    finally:
+        os.unlink(temporary)
 
-        elif args.command == "decrypt":
-            if not os.path.exists(args.file):
-                print(f"Error: File {args.file} not found.")
-                sys.exit(1)
-            with open(args.file, "rb") as f:
-                data = f.read()
-            cipher = FeistelCipher(args.password)
-            try:
-                decrypted = cipher.decrypt(data)
-            except ValueError as e:
-                print(f"Decryption Error: {e}")
-                sys.exit(1)
-            output_file = args.file
-            if output_file.endswith(".enc"):
-                output_file = output_file[:-4]
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Experimental Feistel cipher; educational use only")
+    commands = parser.add_subparsers(dest="command", required=True)
+    for command in ("encrypt", "decrypt", "encrypt-str", "decrypt-str"):
+        sub = commands.add_parser(command)
+        sub.add_argument("source", help="File path, plaintext, or hex ciphertext")
+        sub.add_argument("password", nargs="?", help="Legacy option; omit for a hidden prompt")
+        if command in ("encrypt", "decrypt"):
+            sub.add_argument("-o", "--output", help="Destination path (must not already exist)")
+    args = parser.parse_args(argv)
+    try:
+        password = args.password if args.password is not None else getpass.getpass("Password: ")
+        if args.password is None and args.command.startswith("encrypt"):
+            if password != getpass.getpass("Confirm password: "):
+                raise ValueError("Passwords do not match.")
+        with FeistelCipher(password) as cipher:
+            if args.command in ("encrypt", "decrypt"):
+                source = Path(args.source)
+                destination = Path(args.output or (str(source) + (".enc" if args.command == "encrypt" else ".dec")))
+                if source.resolve() == destination.resolve():
+                    raise ValueError("Input and output paths must differ.")
+                if destination.exists():
+                    raise FileExistsError(f"Output already exists: {destination}. Choose --output with a new path.")
+                data = source.read_bytes()
+                result = cipher.encrypt(data) if args.command == "encrypt" else cipher.decrypt(data)
+                write_output(destination, result)
+                print(f"Saved {destination}")
+            elif args.command == "encrypt-str":
+                print(cipher.encrypt(args.source.encode("utf-8")).hex())
             else:
-                output_file += ".dec"
-            with open(output_file, "wb") as f:
-                f.write(decrypted)
-            print(f"Successfully decrypted {args.file} to {output_file}")
+                print(cipher.decrypt(bytes.fromhex(args.source)).decode("utf-8"))
+        return 0
+    except (OSError, ValueError, EOFError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("Cancelled.", file=sys.stderr)
+        return 130
 
-        elif args.command == "encrypt-str":
-            cipher = FeistelCipher(args.password)
-            encrypted = cipher.encrypt(args.text.encode('utf-8'))
-            print("Ciphertext (Hex):")
-            print(encrypted.hex())
-
-        elif args.command == "decrypt-str":
-            cipher = FeistelCipher(args.password)
-            try:
-                encrypted_bytes = bytes.fromhex(args.hex_cipher)
-                decrypted = cipher.decrypt(encrypted_bytes)
-                print("Decrypted Text:")
-                print(decrypted.decode('utf-8'))
-            except ValueError as e:
-                print(f"Decryption Error: {e}")
-                sys.exit(1)
-
-    except Exception as e:
-        print(f"Unexpected error occurred: {e}")
-        sys.exit(1)
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
