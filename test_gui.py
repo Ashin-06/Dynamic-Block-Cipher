@@ -3,7 +3,12 @@ import time
 import tempfile
 from pathlib import Path
 import unittest
-import tkinter as tk
+import unittest
+
+try:
+    import tkinter as tk
+except ImportError:  # Python built without Tk, common on servers
+    raise unittest.SkipTest("tkinter is not available")
 from gui import App
 
 class GuiTests(unittest.TestCase):
