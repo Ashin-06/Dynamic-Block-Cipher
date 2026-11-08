@@ -21,8 +21,11 @@ jobs:
       - name: Test on Linux with GUI display
         if: runner.os == 'Linux'
         run: xvfb-run -a python -m unittest discover -v
-      - name: Test on Windows and macOS
-        if: runner.os != 'Linux'
+      - name: Test on Windows
+        if: runner.os == 'Windows'
         run: python -m unittest discover -v
+      - name: Test on macOS without the GUI tests, which need a desktop session the runner lacks
+        if: runner.os == 'macOS'
+        run: python -m unittest -v test_cipher test_hardening
       - name: Compile modules
         run: python -m compileall -q cipher.py gui.py pq_key_exchange.py demo.py avalanche_demo.py
