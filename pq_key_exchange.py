@@ -25,6 +25,7 @@ except (ImportError, OSError):
 HAS_CRYPTOGRAPHY = False
 try:
     from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, load_der_public_key
     HAS_CRYPTOGRAPHY = True
 except (ImportError, OSError):
     pass
@@ -56,7 +57,6 @@ class HybridKeyExchange:
         ec_pub = ec_priv.public_key()
         private_keys["ec"] = ec_priv
         # Serialized EC public key bytes
-        from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
         public_keys["ec"] = ec_pub.public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
 
         # 2. Post-Quantum ML-KEM Generation
@@ -86,7 +86,6 @@ class HybridKeyExchange:
         # 1. Classical ECDH Shared Secret
         # Generate Bob's ephemeral EC key
         bob_ec_priv = ec.generate_private_key(ec.SECP256R1())
-        from cryptography.hazmat.primitives.serialization import load_der_public_key, Encoding, PublicFormat
         alice_ec_pub = load_der_public_key(peer_public_keys["ec"])
 
         # Compute EC shared secret
@@ -119,7 +118,6 @@ class HybridKeyExchange:
         shared_secrets = []
 
         # 1. Decapsulate Classical ECDH
-        from cryptography.hazmat.primitives.serialization import load_der_public_key
         bob_ec_pub = load_der_public_key(peer_ciphertexts["ec"])
         alice_ec_priv = private_keys["ec"]
 

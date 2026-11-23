@@ -1,0 +1,4 @@
+# Optional post-quantum hybrid key exchange (pq_key_exchange.py).
+# liboqs-python also needs the native liboqs library; see README.
+cryptography>=42
+liboqs-python>=0.10
