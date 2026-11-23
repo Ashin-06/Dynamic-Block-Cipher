@@ -6,7 +6,7 @@ Run:  python demo.py
 Shows all features working step-by-step with clear explanations.
 """
 
-import os, sys, time
+import os, secrets, sys, time
 
 # Force UTF-8 stdout to avoid UnicodeEncodeError on Windows terminals with non-UTF-8 locales
 if sys.platform.startswith('win'):
@@ -47,7 +47,7 @@ header("DEMO 1: String Encryption & Decryption")
 step("Encrypting a multi-case, emoji, and symbol-rich string...")
 
 plaintext_str = "Dynamic Block Cipher v2 - Secure! Hello: ashin. Emoji: [lock] [rocket]"
-password = "Ashin@Cipher2025"
+password = secrets.token_urlsafe(18) + "!aA1"  # a fresh passphrase each run; never ship a fixed one
 
 t0 = time.time()
 cipher = FeistelCipher(password)
